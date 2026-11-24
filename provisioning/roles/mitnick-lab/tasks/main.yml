@@ -19,21 +19,22 @@
 
 - name: Install Docker Engine + Compose plugin
   apt:
-    name: ["docker-ce", "docker-ce-cli", "containerd.io", "docker-compose-plugin"]
+    name:
+      ["docker-ce", "docker-ce-cli", "containerd.io", "docker-compose-plugin"]
     update_cache: yes
 
-- name: Add 'user' to the docker group
+- name: Add 'seed' to the docker group
   user:
-    name: user
+    name: seed
     groups: docker
     append: yes
 
 # --- Convenience aliases, matching the official SEED Lab manual exactly ---
 - name: Add dockps/docksh/dcbuild/dcup/dcdown aliases
   blockinfile:
-    path: /home/user/.bashrc
+    path: /home/seed/.bashrc
     create: yes
-    owner: user
+    owner: seed
     block: |
       alias dcbuild='docker compose build'
       alias dcup='docker compose up -d'
@@ -44,10 +45,10 @@
 # --- Ship the Labsetup folder ---
 - name: Create Labsetup directory tree
   file:
-    path: "/home/user/Labsetup/{{ item }}"
+    path: "/home/seed/Labsetup/{{ item }}"
     state: directory
-    owner: user
-    group: user
+    owner: seed
+    group: seed
   loop:
     - xterminal
     - trustedserver
@@ -58,32 +59,32 @@
 - name: Copy docker-compose.yml
   copy:
     src: Labsetup/docker-compose.yml
-    dest: /home/user/Labsetup/docker-compose.yml
-    owner: user
+    dest: /home/seed/Labsetup/docker-compose.yml
+    owner: seed
 
 - name: Copy xterminal container files
   copy:
     src: "Labsetup/xterminal/"
-    dest: /home/user/Labsetup/xterminal/
-    owner: user
+    dest: /home/seed/Labsetup/xterminal/
+    owner: seed
 
 - name: Copy trustedserver container files
   copy:
     src: "Labsetup/trustedserver/"
-    dest: /home/user/Labsetup/trustedserver/
-    owner: user
+    dest: /home/seed/Labsetup/trustedserver/
+    owner: seed
 
 - name: Copy attacker container files
   copy:
     src: "Labsetup/attacker/"
-    dest: /home/user/Labsetup/attacker/
-    owner: user
+    dest: /home/seed/Labsetup/attacker/
+    owner: seed
 
 - name: Copy attacker exploit skeleton scripts into the shared volume
   copy:
     src: "Labsetup/volumes/"
-    dest: /home/user/Labsetup/volumes/
-    owner: user
+    dest: /home/seed/Labsetup/volumes/
+    owner: seed
 
 # --- Plant the per-student APG flags. NEVER self-generate these: use the
 #     injected {{ flag_hijack }} / {{ flag_backdoor }} values directly, or
@@ -91,8 +92,8 @@
 - name: Plant flag_hijack (templated, not self-generated)
   template:
     src: flag.txt.j2
-    dest: /home/user/Labsetup/secrets/flag_hijack.txt
-    owner: user
+    dest: /home/seed/Labsetup/secrets/flag_hijack.txt
+    owner: seed
     mode: "0644"
   vars:
     flag_value: "{{ flag_hijack }}"
@@ -100,18 +101,18 @@
 - name: Plant flag_backdoor (templated, not self-generated)
   template:
     src: flag.txt.j2
-    dest: /home/user/Labsetup/secrets/flag_backdoor.txt
-    owner: user
+    dest: /home/seed/Labsetup/secrets/flag_backdoor.txt
+    owner: seed
     mode: "0644"
   vars:
     flag_value: "{{ flag_backdoor }}"
 
 - name: Build the lab containers
   community.docker.docker_compose_v2:
-    project_src: /home/user/Labsetup
+    project_src: /home/seed/Labsetup
     build: always
     state: present
-  become_user: user
+  become_user: seed
 
 # Gotcha carried over from the buffer-overflow lab: `docker compose up -d`
 # can return success while a container dies seconds later (e.g. seccomp
@@ -135,7 +136,7 @@
     - name: Dump logs from every container to help diagnose
       command: docker compose logs
       args:
-        chdir: /home/user/Labsetup
+        chdir: /home/seed/Labsetup
       register: compose_logs
     - debug:
         var: compose_logs.stdout_lines
