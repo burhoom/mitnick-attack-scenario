@@ -1,0 +1,12 @@
+# APG (Automatic Problem Generator) variables — one random value per sandbox,
+# injected into provisioning as plain Ansible variables ({{ flag_hijack }} etc).
+# Planted as bind-mounted read-only files inside the xterminal container
+# (see roles/mitnick-lab/templates/) — never self-generated in the role itself.
+
+flag_hijack:
+  type: password
+  length: 16
+
+flag_backdoor:
+  type: password
+  length: 16

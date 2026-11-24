@@ -1,0 +1,52 @@
+This repository combines material under two different licenses. Read both
+before reusing or redistributing.
+
+--------------------------------------------------------------------------
+1. SANDBOX/TRAINING STRUCTURE (topology.yml layout, training.json schema,
+   Ansible role conventions) — follows the pattern of:
+
+   library-junior-hacker (https://github.com/cyberrangecz/library-junior-hacker)
+   Cybersecurity Laboratory, Faculty of Informatics, Masaryk University
+   Code: MIT License. Game design: CC BY 4.0.
+   Based in turn on: junior-hacker
+   (https://gitlab.ics.muni.cz/muni-kypo-trainings/games/junior-hacker)
+   Leading author: Miriam Galikova. Contributors/Consultants: Valdemar
+   Svabensky, Jan Vykopal.
+
+   No text or assets from library-junior-hacker's own scenario (its Kali/
+   nmap/fcrackzip storyline, files, or flags) are reused here — only its
+   repository layout and conventions.
+
+--------------------------------------------------------------------------
+2. ATTACK SCENARIO, TASK BREAKDOWN, AND TECHNICAL CONTENT — adapted from:
+
+   The Mitnick Attack Lab
+   Copyright (c) 2020 Wenliang Du.
+   SEED Labs, https://seedsecuritylabs.org/Labs_20.04/Files/Mitnick_Attack/Mitnick_Attack.pdf
+   Licensed under Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+   International (CC BY-NC-SA 4.0):
+   https://creativecommons.org/licenses/by-nc-sa/4.0/
+
+   This is NOT the same license as (1) above. It is Non-Commercial and
+   Share-Alike:
+     - You may use, adapt and redistribute it for non-commercial teaching
+       (a university TP/lab clearly qualifies).
+     - Any redistribution of this adapted content (training.json's task
+       text, the container scripts, this game_design.md) must carry the
+       same CC BY-NC-SA 4.0 notice.
+     - Commercial use (selling this training, bundling it into a paid
+       product) requires separate permission from the copyright holder.
+
+   The original SEED PDF copyright notice itself requires that "this
+   copyright notice must be left intact, or reproduced in a way that is
+   reasonable to the medium in which the work is being re-published" in
+   any remix — this file is that reproduction for this repository.
+
+--------------------------------------------------------------------------
+3. THIS REPOSITORY'S OWN NEW CODE (Dockerfiles, entrypoints, Ansible tasks,
+   Scapy skeletons not copied from the SEED PDF, topology.yml, training.json
+   as a JSON file) is released under the MIT License, consistent with (1),
+   EXCEPT where it embeds adapted text/content from (2) (the task prose in
+   training.json, the Scapy restriction rules, game_design.md) — that
+   content stays CC BY-NC-SA 4.0 per (2) regardless of the file format it's
+   stored in.

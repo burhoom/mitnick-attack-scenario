@@ -1,0 +1,57 @@
+version: "3.8"
+
+# Topology and addressing match the official SEED Labs "Mitnick Attack Lab"
+# manual exactly: 10.9.0.0/24, X-Terminal .5, Trusted Server .6, attacker
+# in host-networking mode. See xterminal/trustedserver/attacker/README
+# comments for what each container does.
+
+services:
+  xterminal:
+    build: ./xterminal
+    container_name: xterminal-10.9.0.5
+    hostname: xterminal
+    networks:
+      mitnicknet:
+        ipv4_address: 10.9.0.5
+    volumes:
+      - ./secrets/flag_hijack.txt:/home/seed/flag_hijack.txt:ro
+      - ./secrets/flag_backdoor.txt:/home/seed/flag_backdoor.txt:ro
+    tty: true
+    restart: unless-stopped
+
+  trustedserver:
+    build: ./trustedserver
+    container_name: trustedserver-10.9.0.6
+    hostname: trustedserver
+    networks:
+      mitnicknet:
+        ipv4_address: 10.9.0.6
+    # Simulates the effect of Mitnick's SYN flood: this container stays up
+    # (so ARP still resolves normally and a port scan still shows rshd
+    # open) but its kernel never sees -- and therefore never resets --
+    # an unsolicited SYN+ACK. See trustedserver/Dockerfile for the rule.
+    cap_add:
+      - NET_ADMIN
+    tty: true
+    restart: unless-stopped
+
+  attacker:
+    build: ./attacker
+    container_name: attacker
+    # Host-mode networking is what lets this container capture on the
+    # Docker bridge device itself and see traffic between the other two
+    # containers, the same trick the official SEED lab relies on.
+    network_mode: host
+    privileged: true
+    volumes:
+      - ./volumes:/volumes
+    tty: true
+    restart: unless-stopped
+
+networks:
+  mitnicknet:
+    name: net-10.9.0.0
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.9.0.0/24

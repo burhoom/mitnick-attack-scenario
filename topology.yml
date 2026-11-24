@@ -1,0 +1,68 @@
+name: training-mitnick-attack
+
+# ---------------------------------------------------------------------------
+# DESIGN NOTE (read before "fixing" this to look like a normal 3-host lab):
+#
+# The Mitnick attack needs the attacker to SNIFF a unicast SYN+ACK that
+# X-Terminal sends to the Trusted Server, and then INJECT spoofed packets
+# that X-Terminal will accept as coming from the Trusted Server. On a real
+# OpenStack/Neutron network (OVS, MAC-learning, port security), that does
+# not work for free: a learning switch will not flood someone else's
+# unicast frames to the attacker's port, and port-security will drop
+# outbound packets whose source IP doesn't match the port's address.
+# Getting around that needs cloud-admin-level port mirroring / disabled
+# port security on three separate VMs.
+#
+# SEED's own lab sidesteps all of this by putting all three roles in one
+# VM as Docker containers on a single Docker bridge, with the attacker
+# container in `network_mode: host`. Capturing on the bridge device
+# itself (not on an individual veth) lets a single host see all bridged
+# traffic the way a hub would — that's the whole trick, and it's why the
+# official skeleton sniffs on an interface named `br-****` rather than
+# on "eth0". That trick does not survive being split across real VMs.
+#
+# So: one host here, not three. Ansible builds the official Labsetup
+# Docker Compose stack (xterminal / trustedserver / attacker containers)
+# inside it. Students get console/SSH on this one VM and `docker exec`
+# into the attacker container, exactly like the SEED manual's `dockps`
+# / `docksh` workflow.
+# ---------------------------------------------------------------------------
+
+hosts:
+  - name: seed-vm
+    base_box:
+      image: seed                 # SEED Ubuntu 20.04 image — confirm exact name in your catalog
+      mgmt_user: ubuntu            # confirm this is the real default account on that image
+    flavor: m1.large               # builds 2 Docker images + runs 3 containers; m1.medium may be tight
+
+routers:
+  - name: router
+    base_box:
+      image: debian-12-x86_64
+      mgmt_user: debian
+    flavor: m1.small
+
+wan:
+  name: internet-connection
+  cidr: 100.100.100.0/24
+
+networks:
+  - name: lab-switch
+    cidr: 10.1.26.0/24
+    accessible_by_user: True       # students need console/SSH on seed-vm itself
+
+net_mappings:
+  - { host: seed-vm, network: lab-switch, ip: 10.1.26.10 }
+
+router_mappings:
+  - { router: router, network: lab-switch, ip: 10.1.26.1 }
+
+groups: []
+
+# Everything below 10.1.26.0/24 is irrelevant to the attack itself: it's
+# just how the platform reaches seed-vm for provisioning and how students
+# reach its console. The real lab network is the Docker-internal
+# 10.9.0.0/24 that provisioning creates inside seed-vm (see
+# provisioning/roles/mitnick-lab/files/Labsetup/docker-compose.yml),
+# matching the addressing used in the official SEED PDF:
+#   attacker (host-mode container) / xterminal 10.9.0.5 / trustedserver 10.9.0.6

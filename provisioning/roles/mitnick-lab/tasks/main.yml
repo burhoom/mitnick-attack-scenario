@@ -1,0 +1,143 @@
+---
+# Deploys the official SEED "Mitnick Attack Lab" Docker Compose stack inside
+# this one VM. See topology.yml for why this is one host, not three.
+
+- name: Install Docker prerequisites
+  apt:
+    name: ["ca-certificates", "curl", "gnupg", "python3-pip"]
+    update_cache: yes
+
+- name: Add Docker's GPG key
+  apt_key:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+
+- name: Add Docker apt repository
+  apt_repository:
+    repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+    state: present
+
+- name: Install Docker Engine + Compose plugin
+  apt:
+    name: ["docker-ce", "docker-ce-cli", "containerd.io", "docker-compose-plugin"]
+    update_cache: yes
+
+- name: Add 'user' to the docker group
+  user:
+    name: user
+    groups: docker
+    append: yes
+
+# --- Convenience aliases, matching the official SEED Lab manual exactly ---
+- name: Add dockps/docksh/dcbuild/dcup/dcdown aliases
+  blockinfile:
+    path: /home/user/.bashrc
+    create: yes
+    owner: user
+    block: |
+      alias dcbuild='docker compose build'
+      alias dcup='docker compose up -d'
+      alias dcdown='docker compose down'
+      alias dockps='docker ps --format "{{ "{{.ID}} {{.Names}}" }}"'
+      alias docksh='f(){ docker exec -it "$1" /bin/bash; }; f'
+
+# --- Ship the Labsetup folder ---
+- name: Create Labsetup directory tree
+  file:
+    path: "/home/user/Labsetup/{{ item }}"
+    state: directory
+    owner: user
+    group: user
+  loop:
+    - xterminal
+    - trustedserver
+    - attacker
+    - volumes
+    - secrets
+
+- name: Copy docker-compose.yml
+  copy:
+    src: Labsetup/docker-compose.yml
+    dest: /home/user/Labsetup/docker-compose.yml
+    owner: user
+
+- name: Copy xterminal container files
+  copy:
+    src: "Labsetup/xterminal/"
+    dest: /home/user/Labsetup/xterminal/
+    owner: user
+
+- name: Copy trustedserver container files
+  copy:
+    src: "Labsetup/trustedserver/"
+    dest: /home/user/Labsetup/trustedserver/
+    owner: user
+
+- name: Copy attacker container files
+  copy:
+    src: "Labsetup/attacker/"
+    dest: /home/user/Labsetup/attacker/
+    owner: user
+
+- name: Copy attacker exploit skeleton scripts into the shared volume
+  copy:
+    src: "Labsetup/volumes/"
+    dest: /home/user/Labsetup/volumes/
+    owner: user
+
+# --- Plant the per-student APG flags. NEVER self-generate these: use the
+#     injected {{ flag_hijack }} / {{ flag_backdoor }} values directly, or
+#     the platform's answer check will never match (see Gotcha #1). ---
+- name: Plant flag_hijack (templated, not self-generated)
+  template:
+    src: flag.txt.j2
+    dest: /home/user/Labsetup/secrets/flag_hijack.txt
+    owner: user
+    mode: "0644"
+  vars:
+    flag_value: "{{ flag_hijack }}"
+
+- name: Plant flag_backdoor (templated, not self-generated)
+  template:
+    src: flag.txt.j2
+    dest: /home/user/Labsetup/secrets/flag_backdoor.txt
+    owner: user
+    mode: "0644"
+  vars:
+    flag_value: "{{ flag_backdoor }}"
+
+- name: Build the lab containers
+  community.docker.docker_compose_v2:
+    project_src: /home/user/Labsetup
+    build: always
+    state: present
+  become_user: user
+
+# Gotcha carried over from the buffer-overflow lab: `docker compose up -d`
+# can return success while a container dies seconds later (e.g. seccomp
+# killing a privileged/host-mode container). Always verify, don't trust
+# the exit code alone.
+- name: Confirm all three containers are actually running
+  command: docker ps --filter "status=running" --format "{{ '{{.Names}}' }}"
+  register: running_containers
+  changed_when: false
+
+- name: Fail loudly (with logs) if a container did not stay up
+  block:
+    - name: Assert xterminal, trustedserver and attacker are all running
+      assert:
+        that:
+          - "'xterminal-10.9.0.5' in running_containers.stdout"
+          - "'trustedserver-10.9.0.6' in running_containers.stdout"
+          - "'attacker' in running_containers.stdout"
+        fail_msg: "One or more Mitnick lab containers exited after startup — dumping logs below."
+  rescue:
+    - name: Dump logs from every container to help diagnose
+      command: docker compose logs
+      args:
+        chdir: /home/user/Labsetup
+      register: compose_logs
+    - debug:
+        var: compose_logs.stdout_lines
+    - fail:
+        msg: "Mitnick lab containers failed to start — see logs above."
