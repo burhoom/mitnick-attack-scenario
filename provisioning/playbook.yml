@@ -11,8 +11,8 @@
   become: true
   roles:
     - role: user-access
-      user_access_username: user
-      user_access_password: Password123
+      user_access_username: seed
+      user_access_password: dees
       user_access_sudo: True
     - role: mitnick-lab
     - role: chrony
@@ -30,5 +30,5 @@
       slf_destination_port: '{% if hostvars["man"] is defined -%} 514 {%- else -%} 515 {%- endif %}'
       slf_destination: '{% if hostvars["man"] is defined -%} {{ hostvars["man"].ansible_host }} {%- else -%} {{ central_syslog_ip }} {%- endif %}'
       slf_sandbox_id: "{{ global_sandbox_id | default(student_id) | default(0) }}"
-      slf_sandbox_name: '{{ global_sandbox_name | default(sandbox_name) }}'
-      slf_pool_id: '{{ global_pool_id | default(None) }}'
+      slf_sandbox_name: "{{ global_sandbox_name | default(sandbox_name) }}"
+      slf_pool_id: "{{ global_pool_id | default(None) }}"
