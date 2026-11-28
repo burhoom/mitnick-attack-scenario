@@ -2,39 +2,80 @@
 # Deploys the official SEED "Mitnick Attack Lab" Docker Compose stack inside
 # this one VM. See topology.yml for why this is one host, not three.
 
-- name: Install Docker prerequisites
-  apt:
-    name: ["ca-certificates", "curl", "gnupg", "python3-pip"]
-    update_cache: yes
+- name: Check if Docker and Compose v2 are already installed
+  ansible.builtin.command: docker compose version
+  register: docker_compose_check
+  changed_when: false
+  failed_when: false
 
-- name: Add Docker's GPG key
-  apt_key:
-    url: https://download.docker.com/linux/ubuntu/gpg
-    state: present
+- name: Install Docker Engine and Compose v2 if missing
+  when: docker_compose_check.rc != 0
+  block:
+    - name: Install Docker prerequisites
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - python3-pip
+        state: present
+        update_cache: true
 
-- name: Add Docker apt repository
-  apt_repository:
-    repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
-    state: present
+    - name: Create /etc/apt/keyrings directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
 
-- name: Install Docker Engine + Compose plugin
-  apt:
-    name:
-      ["docker-ce", "docker-ce-cli", "containerd.io", "docker-compose-plugin"]
-    update_cache: yes
+    - name: Download Docker's official GPG key
+      ansible.builtin.get_url:
+        url: "https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg"
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+
+    - name: Add Docker apt repository
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [arch={{ 'amd64' if ansible_architecture == 'x86_64' else ansible_architecture }}
+          signed-by=/etc/apt/keyrings/docker.asc]
+          https://download.docker.com/linux/{{ ansible_distribution | lower }}
+          {{ ansible_distribution_release }} stable
+        filename: docker
+        state: present
+        update_cache: true
+
+    - name: Install Docker Engine + Compose plugin
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+
+- name: Ensure Docker service is running and enabled
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
 
 - name: Add 'seed' to the docker group
-  user:
+  ansible.builtin.user:
     name: seed
     groups: docker
-    append: yes
+    append: true
+
+- name: Reset SSH connection so docker group membership takes effect
+  ansible.builtin.meta: reset_connection
 
 # --- Convenience aliases, matching the official SEED Lab manual exactly ---
 - name: Add dockps/docksh/dcbuild/dcup/dcdown aliases
-  blockinfile:
+  ansible.builtin.blockinfile:
     path: /home/seed/.bashrc
-    create: yes
+    create: true
     owner: seed
+    group: seed
     block: |
       alias dcbuild='docker compose build'
       alias dcup='docker compose up -d'
@@ -44,7 +85,7 @@
 
 # --- Ship the Labsetup folder ---
 - name: Create Labsetup directory tree
-  file:
+  ansible.builtin.file:
     path: "/home/seed/Labsetup/{{ item }}"
     state: directory
     owner: seed
@@ -57,57 +98,64 @@
     - secrets
 
 - name: Copy docker-compose.yml
-  copy:
+  ansible.builtin.copy:
     src: Labsetup/docker-compose.yml
     dest: /home/seed/Labsetup/docker-compose.yml
     owner: seed
+    group: seed
 
 - name: Copy xterminal container files
-  copy:
+  ansible.builtin.copy:
     src: "Labsetup/xterminal/"
     dest: /home/seed/Labsetup/xterminal/
     owner: seed
+    group: seed
 
 - name: Copy trustedserver container files
-  copy:
+  ansible.builtin.copy:
     src: "Labsetup/trustedserver/"
     dest: /home/seed/Labsetup/trustedserver/
     owner: seed
+    group: seed
 
 - name: Copy attacker container files
-  copy:
+  ansible.builtin.copy:
     src: "Labsetup/attacker/"
     dest: /home/seed/Labsetup/attacker/
     owner: seed
+    group: seed
 
 - name: Copy attacker exploit skeleton scripts into the shared volume
-  copy:
+  ansible.builtin.copy:
     src: "Labsetup/volumes/"
     dest: /home/seed/Labsetup/volumes/
     owner: seed
+    group: seed
 
 # --- Plant the per-student APG flags. NEVER self-generate these: use the
 #     injected {{ flag_hijack }} / {{ flag_backdoor }} values directly, or
 #     the platform's answer check will never match (see Gotcha #1). ---
 - name: Plant flag_hijack (templated, not self-generated)
-  template:
+  ansible.builtin.template:
     src: flag.txt.j2
     dest: /home/seed/Labsetup/secrets/flag_hijack.txt
     owner: seed
+    group: seed
     mode: "0644"
   vars:
     flag_value: "{{ flag_hijack }}"
 
 - name: Plant flag_backdoor (templated, not self-generated)
-  template:
+  ansible.builtin.template:
     src: flag.txt.j2
     dest: /home/seed/Labsetup/secrets/flag_backdoor.txt
     owner: seed
+    group: seed
     mode: "0644"
   vars:
     flag_value: "{{ flag_backdoor }}"
 
-- name: Build the lab containers
+- name: Build and start the lab containers
   community.docker.docker_compose_v2:
     project_src: /home/seed/Labsetup
     build: always
@@ -119,14 +167,14 @@
 # killing a privileged/host-mode container). Always verify, don't trust
 # the exit code alone.
 - name: Confirm all three containers are actually running
-  command: docker ps --filter "status=running" --format "{{ '{{.Names}}' }}"
+  ansible.builtin.command: docker ps --filter "status=running" --format "{{ '{{.Names}}' }}"
   register: running_containers
   changed_when: false
 
 - name: Fail loudly (with logs) if a container did not stay up
   block:
     - name: Assert xterminal, trustedserver and attacker are all running
-      assert:
+      ansible.builtin.assert:
         that:
           - "'xterminal-10.9.0.5' in running_containers.stdout"
           - "'trustedserver-10.9.0.6' in running_containers.stdout"
@@ -134,11 +182,13 @@
         fail_msg: "One or more Mitnick lab containers exited after startup — dumping logs below."
   rescue:
     - name: Dump logs from every container to help diagnose
-      command: docker compose logs
+      ansible.builtin.command: docker compose logs
       args:
         chdir: /home/seed/Labsetup
       register: compose_logs
-    - debug:
+    - name: Print container logs
+      ansible.builtin.debug:
         var: compose_logs.stdout_lines
-    - fail:
+    - name: Abort provisioning
+      ansible.builtin.fail:
         msg: "Mitnick lab containers failed to start — see logs above."
